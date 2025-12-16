@@ -487,13 +487,22 @@ function App() {
         throw new Error("Failed to get transfer calldata");
       }
 
+      // Fetch current nonce from API
+      const nonceResponse = await fetch(
+        `${SLOPWALLET_API}/nonce?wallet=${smartContractWallet}&qx=${credential.qx}&qy=${credential.qy}`
+      );
+      const nonceData = await nonceResponse.json();
+      if (!nonceData.nonce && nonceData.nonce !== "0") {
+        throw new Error("Failed to fetch nonce");
+      }
+      const nonce = BigInt(nonceData.nonce);
+
       setTransferStatus("Please sign with passkey...");
 
       // Step 2: Build challenge hash and sign with passkey
       const target = transferData.call.target as `0x${string}`;
       const value = BigInt(transferData.call.value);
       const data = transferData.call.data as `0x${string}`;
-      const nonce = BigInt(0); // TODO: Fetch from smart wallet contract once passkey is registered
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
 
       const challengeHash = buildChallengeHash(
