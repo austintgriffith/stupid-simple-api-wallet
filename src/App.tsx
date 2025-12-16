@@ -1,11 +1,51 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import BlockiesSvg from "blockies-react-svg";
+import { keccak256, concat, toHex } from "viem";
 import "./App.css";
 
 // Passkey configuration - RP ID must match associated domain for iOS app
-// This must match the domain in App.entitlements webcredentials
-const PASSKEY_RP_ID = "reactapp-sigma-lyart.vercel.app";
-const PASSKEY_RP_NAME = "Passkey Wallet";
+// Use the production domain when in Capacitor native app, otherwise use current hostname
+const isNativeApp = !!(window as any).Capacitor?.isNativePlatform?.();
+const PASSKEY_RP_ID = isNativeApp
+  ? "reactapp-sigma-lyart.vercel.app" // Must match App.entitlements webcredentials
+  : window.location.hostname;
+const PASSKEY_RP_NAME = "Slop Wallet Mobile";
+
+// SlopWallet API configuration
+const SLOPWALLET_API = "https://slopwallet.com/api";
+const BASE_CHAIN_ID = BigInt(8453);
+
+// Balance response interface
+interface BalanceResponse {
+  address: string;
+  balances: {
+    eth: { raw: string; formatted: string; symbol: string; decimals: number };
+    usdc: { raw: string; formatted: string; symbol: string; decimals: number };
+  };
+}
+
+// Transfer calldata response interface
+interface TransferResponse {
+  success: boolean;
+  asset: string;
+  amount: string;
+  to: string;
+  call: {
+    target: string;
+    value: string;
+    data: string;
+  };
+}
+
+// WebAuthn auth data for relay
+interface WebAuthnAuth {
+  r: string;
+  s: string;
+  challengeIndex: string;
+  typeIndex: string;
+  authenticatorData: string;
+  clientDataJSON: string;
+}
 
 // Helper to generate random bytes
 function generateRandomBytes(length: number): ArrayBuffer {
@@ -28,7 +68,173 @@ interface PasskeyCredential {
   id: string;
   rawId: string;
   publicKey?: string;
+  qx?: string;
+  qy?: string;
   createdAt: Date;
+}
+
+// Build challenge hash for signing
+function buildChallengeHash(
+  chainId: bigint,
+  walletAddress: `0x${string}`,
+  target: `0x${string}`,
+  value: bigint,
+  data: `0x${string}`,
+  nonce: bigint,
+  deadline: bigint
+): `0x${string}` {
+  return keccak256(
+    concat([
+      toHex(chainId, { size: 32 }),
+      walletAddress,
+      target,
+      toHex(value, { size: 32 }),
+      data,
+      toHex(nonce, { size: 32 }),
+      toHex(deadline, { size: 32 }),
+    ])
+  );
+}
+
+// Parse ASN.1 DER signature to extract r and s values
+function parseAsn1Signature(signature: ArrayBuffer): { r: bigint; s: bigint } {
+  const bytes = new Uint8Array(signature);
+  let offset = 0;
+
+  // Check for SEQUENCE tag (0x30)
+  if (bytes[offset++] !== 0x30) {
+    throw new Error("Invalid ASN.1 signature: expected SEQUENCE");
+  }
+
+  // Skip sequence length
+  let seqLen = bytes[offset++];
+  if (seqLen & 0x80) {
+    offset += seqLen & 0x7f;
+  }
+
+  // Parse r INTEGER
+  if (bytes[offset++] !== 0x02) {
+    throw new Error("Invalid ASN.1 signature: expected INTEGER for r");
+  }
+  let rLen = bytes[offset++];
+  let rBytes = bytes.slice(offset, offset + rLen);
+  offset += rLen;
+  // Remove leading zero if present (for positive number representation)
+  if (rBytes[0] === 0x00 && rBytes.length > 32) {
+    rBytes = rBytes.slice(1);
+  }
+
+  // Parse s INTEGER
+  if (bytes[offset++] !== 0x02) {
+    throw new Error("Invalid ASN.1 signature: expected INTEGER for s");
+  }
+  let sLen = bytes[offset++];
+  let sBytes = bytes.slice(offset, offset + sLen);
+  // Remove leading zero if present
+  if (sBytes[0] === 0x00 && sBytes.length > 32) {
+    sBytes = sBytes.slice(1);
+  }
+
+  // Pad to 32 bytes if needed
+  const rPadded = new Uint8Array(32);
+  const sPadded = new Uint8Array(32);
+  rPadded.set(rBytes, 32 - rBytes.length);
+  sPadded.set(sBytes, 32 - sBytes.length);
+
+  const r = BigInt(
+    "0x" +
+      Array.from(rPadded)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+  );
+  const s = BigInt(
+    "0x" +
+      Array.from(sPadded)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+  );
+
+  return { r, s };
+}
+
+// Normalize s value to low-s form (required by secp256r1)
+function normalizeS(s: bigint): bigint {
+  const curveOrder = BigInt(
+    "0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551"
+  );
+  const halfOrder = curveOrder / BigInt(2);
+  return s > halfOrder ? curveOrder - s : s;
+}
+
+// Extract public key coordinates from SPKI format (what getPublicKey() returns)
+function extractPublicKeyFromSpki(spkiKey: ArrayBuffer): {
+  qx: `0x${string}`;
+  qy: `0x${string}`;
+} {
+  const bytes = new Uint8Array(spkiKey);
+
+  // SPKI format for EC P-256:
+  // - ASN.1 header (variable length, typically 26-27 bytes)
+  // - 0x04 (uncompressed point indicator)
+  // - X coordinate (32 bytes)
+  // - Y coordinate (32 bytes)
+  // Total: header + 65 bytes for the point
+
+  // The last 65 bytes contain: 0x04 + X (32) + Y (32)
+  if (bytes.length < 65) {
+    throw new Error("SPKI key too short");
+  }
+
+  // Find the uncompressed point marker (0x04) followed by 64 bytes
+  let pointStart = -1;
+  for (let i = 0; i < bytes.length - 64; i++) {
+    if (bytes[i] === 0x04) {
+      // Verify this looks like a valid position (near the end)
+      if (bytes.length - i === 65) {
+        pointStart = i;
+        break;
+      }
+    }
+  }
+
+  if (pointStart === -1) {
+    // Fallback: assume last 64 bytes are X and Y (without 0x04 marker)
+    // This can happen with some key formats
+    const qx = bytes.slice(bytes.length - 64, bytes.length - 32);
+    const qy = bytes.slice(bytes.length - 32);
+
+    return {
+      qx: ("0x" +
+        Array.from(qx)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("")) as `0x${string}`,
+      qy: ("0x" +
+        Array.from(qy)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("")) as `0x${string}`,
+    };
+  }
+
+  // Skip 0x04 marker and extract X and Y
+  const qx = bytes.slice(pointStart + 1, pointStart + 33);
+  const qy = bytes.slice(pointStart + 33, pointStart + 65);
+
+  return {
+    qx: ("0x" +
+      Array.from(qx)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")) as `0x${string}`,
+    qy: ("0x" +
+      Array.from(qy)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")) as `0x${string}`,
+  };
+}
+
+// Helper to truncate address for display (0x1234...5678)
+function truncateAddress(address: string): string {
+  if (address.length <= 10) return address;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 function App() {
@@ -36,6 +242,68 @@ function App() {
   const [status, setStatus] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
+  const [showPasskeyDetails, setShowPasskeyDetails] = useState<boolean>(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Balance state
+  const [balances, setBalances] = useState<BalanceResponse["balances"] | null>(
+    null
+  );
+  const [isLoadingBalance, setIsLoadingBalance] = useState<boolean>(false);
+
+  // Transfer state
+  const [recipientAddress, setRecipientAddress] = useState<string>("");
+  const [transferAmount, setTransferAmount] = useState<string>("");
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
+  const [transferStatus, setTransferStatus] = useState<string>("");
+  const [transferTxHash, setTransferTxHash] = useState<string | null>(null);
+
+  const smartContractWallet = process.env.REACT_APP_SMART_CONTRACT_WALLET;
+
+  // Fetch balances from SlopWallet API
+  const fetchBalances = useCallback(async () => {
+    if (!smartContractWallet) return;
+
+    setIsLoadingBalance(true);
+    try {
+      const response = await fetch(
+        `${SLOPWALLET_API}/balances?address=${smartContractWallet}`
+      );
+      const data: BalanceResponse = await response.json();
+      setBalances(data.balances);
+    } catch (error) {
+      console.error("Failed to fetch balances:", error);
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  }, [smartContractWallet]);
+
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    const savedCredentialId = localStorage.getItem("passkey_credential_id");
+    const savedRawId = localStorage.getItem("passkey_raw_id");
+    const savedQx = localStorage.getItem("passkey_qx");
+    const savedQy = localStorage.getItem("passkey_qy");
+
+    if (savedCredentialId && savedRawId) {
+      setCredential({
+        id: savedCredentialId,
+        rawId: savedRawId,
+        qx: savedQx || undefined,
+        qy: savedQy || undefined,
+        createdAt: new Date(),
+      });
+    }
+  }, []);
+
+  // Fetch balances when logged in and auto-refresh every 5 seconds
+  useEffect(() => {
+    if (credential && smartContractWallet) {
+      fetchBalances();
+      const interval = setInterval(fetchBalances, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [credential, smartContractWallet, fetchBalances]);
 
   const copyAddress = async (address: string) => {
     await navigator.clipboard.writeText(address);
@@ -65,12 +333,11 @@ function App() {
           },
           user: {
             id: userId,
-            name: `user_${Date.now()}`,
-            displayName: "Passkey User",
+            name: `slop_wallet_${Date.now()}`,
+            displayName: "Slop Wallet Mobile",
           },
           pubKeyCredParams: [
-            { alg: -7, type: "public-key" }, // ES256
-            { alg: -257, type: "public-key" }, // RS256
+            { alg: -7, type: "public-key" }, // ES256 (P-256)
           ],
           authenticatorSelection: {
             authenticatorAttachment: "platform",
@@ -81,26 +348,49 @@ function App() {
           attestation: "none",
         };
 
-      const credential = (await navigator.credentials.create({
+      const cred = (await navigator.credentials.create({
         publicKey: publicKeyCredentialCreationOptions,
       })) as PublicKeyCredential;
 
-      if (credential) {
+      if (cred) {
         const attestationResponse =
-          credential.response as AuthenticatorAttestationResponse;
+          cred.response as AuthenticatorAttestationResponse;
+
+        const publicKeyBytes = attestationResponse.getPublicKey();
+        let qx: `0x${string}` | undefined;
+        let qy: `0x${string}` | undefined;
+
+        if (publicKeyBytes) {
+          try {
+            const coords = extractPublicKeyFromSpki(publicKeyBytes);
+            qx = coords.qx;
+            qy = coords.qy;
+            console.log("Extracted public key coordinates:", { qx, qy });
+          } catch (e) {
+            console.error("Could not extract public key coordinates:", e);
+            console.log(
+              "Raw public key bytes:",
+              new Uint8Array(publicKeyBytes)
+            );
+          }
+        } else {
+          console.warn("No public key bytes returned from getPublicKey()");
+        }
 
         const passkeyData: PasskeyCredential = {
-          id: credential.id,
-          rawId: bufferToBase64url(credential.rawId),
-          publicKey: bufferToBase64url(
-            attestationResponse.getPublicKey() || new ArrayBuffer(0)
-          ),
+          id: cred.id,
+          rawId: bufferToBase64url(cred.rawId),
+          publicKey: bufferToBase64url(publicKeyBytes || new ArrayBuffer(0)),
+          qx,
+          qy,
           createdAt: new Date(),
         };
 
-        // Store credential ID for later authentication
-        localStorage.setItem("passkey_credential_id", credential.id);
+        // Store credential ID and public key for later use
+        localStorage.setItem("passkey_credential_id", cred.id);
         localStorage.setItem("passkey_raw_id", passkeyData.rawId);
+        if (qx) localStorage.setItem("passkey_qx", qx);
+        if (qy) localStorage.setItem("passkey_qy", qy);
 
         setCredential(passkeyData);
         setStatus("✓ Passkey created successfully!");
@@ -157,24 +447,206 @@ function App() {
     }
   };
 
+  // Transfer USDC using 3-step API flow
+  const handleTransferUSDC = async () => {
+    if (
+      !credential ||
+      !smartContractWallet ||
+      !recipientAddress ||
+      !transferAmount
+    ) {
+      setTransferStatus("✗ Missing required fields");
+      return;
+    }
+
+    if (!credential.qx || !credential.qy) {
+      setTransferStatus(
+        "✗ Passkey public key not available. Please regenerate passkey."
+      );
+      return;
+    }
+
+    setIsTransferring(true);
+    setTransferStatus("Getting transfer data...");
+    setTransferTxHash(null);
+
+    try {
+      // Step 1: Get transfer calldata from API
+      const transferResponse = await fetch(`${SLOPWALLET_API}/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          asset: "USDC",
+          amount: transferAmount,
+          to: recipientAddress,
+        }),
+      });
+
+      const transferData: TransferResponse = await transferResponse.json();
+      if (!transferData.success) {
+        throw new Error("Failed to get transfer calldata");
+      }
+
+      setTransferStatus("Please sign with passkey...");
+
+      // Step 2: Build challenge hash and sign with passkey
+      const target = transferData.call.target as `0x${string}`;
+      const value = BigInt(transferData.call.value);
+      const data = transferData.call.data as `0x${string}`;
+      const nonce = BigInt(0); // TODO: Fetch from smart wallet contract once passkey is registered
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
+
+      const challengeHash = buildChallengeHash(
+        BASE_CHAIN_ID,
+        smartContractWallet as `0x${string}`,
+        target,
+        value,
+        data,
+        nonce,
+        deadline
+      );
+
+      // Convert challenge hash to bytes for WebAuthn
+      const challengeBytes = new Uint8Array(
+        (challengeHash.slice(2).match(/.{2}/g) || []).map((byte) =>
+          parseInt(byte, 16)
+        )
+      );
+
+      // Convert credential ID from base64url to Uint8Array
+      const credentialIdBytes = Uint8Array.from(
+        atob(credential.rawId.replace(/-/g, "+").replace(/_/g, "/")),
+        (c) => c.charCodeAt(0)
+      );
+
+      // Sign with WebAuthn passkey
+      const assertion = (await navigator.credentials.get({
+        publicKey: {
+          challenge: challengeBytes,
+          allowCredentials: [
+            {
+              id: credentialIdBytes,
+              type: "public-key",
+            },
+          ],
+          userVerification: "required",
+          rpId: PASSKEY_RP_ID,
+          timeout: 60000,
+        },
+      })) as PublicKeyCredential;
+
+      if (!assertion) {
+        throw new Error("No assertion returned from passkey");
+      }
+
+      const assertionResponse =
+        assertion.response as AuthenticatorAssertionResponse;
+
+      // Parse the signature (ASN.1 DER format)
+      const { r, s: rawS } = parseAsn1Signature(assertionResponse.signature);
+      const s = normalizeS(rawS);
+
+      // Convert to hex strings
+      const rHex = "0x" + r.toString(16).padStart(64, "0");
+      const sHex = "0x" + s.toString(16).padStart(64, "0");
+
+      // Get authenticator data and client data JSON
+      const authenticatorData =
+        "0x" +
+        Array.from(new Uint8Array(assertionResponse.authenticatorData))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+      const clientDataJSON = new TextDecoder().decode(
+        assertionResponse.clientDataJSON
+      );
+
+      // Find challenge and type indices in clientDataJSON
+      const challengeIndex = clientDataJSON.indexOf('"challenge"');
+      const typeIndex = clientDataJSON.indexOf('"type"');
+
+      const auth: WebAuthnAuth = {
+        r: rHex,
+        s: sHex,
+        challengeIndex: challengeIndex.toString(),
+        typeIndex: typeIndex.toString(),
+        authenticatorData,
+        clientDataJSON,
+      };
+
+      setTransferStatus("Submitting transaction...");
+
+      // Step 3: Submit to relay/facilitator
+      const facilitateResponse = await fetch(`${SLOPWALLET_API}/facilitate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          smartWalletAddress: smartContractWallet,
+          chainId: Number(BASE_CHAIN_ID),
+          isBatch: false,
+          calls: [
+            {
+              target,
+              value: value.toString(),
+              data,
+            },
+          ],
+          qx: credential.qx,
+          qy: credential.qy,
+          deadline: deadline.toString(),
+          auth,
+        }),
+      });
+
+      const facilitateData = await facilitateResponse.json();
+
+      if (facilitateData.success && facilitateData.txHash) {
+        setTransferTxHash(facilitateData.txHash);
+        setTransferStatus("✓ Transfer complete!");
+        setRecipientAddress("");
+        setTransferAmount("");
+        // Refresh balances
+        fetchBalances();
+      } else {
+        throw new Error(facilitateData.error || "Transaction failed");
+      }
+    } catch (error: any) {
+      console.error("Transfer failed:", error);
+      setTransferStatus(`✗ ${error.message || "Transfer failed"}`);
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  // Set max USDC amount
+  const handleMaxAmount = () => {
+    if (balances?.usdc) {
+      setTransferAmount(balances.usdc.formatted);
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem("passkey_credential_id");
     localStorage.removeItem("passkey_raw_id");
+    localStorage.removeItem("passkey_qx");
+    localStorage.removeItem("passkey_qy");
     setCredential(null);
     setStatus("");
+    setBalances(null);
+    setTransferStatus("");
+    setTransferTxHash(null);
   };
 
-  const smartContractWallet = process.env.REACT_APP_SMART_CONTRACT_WALLET;
-
   return (
-    <div className="App">
+    <div className={`App${isNativeApp ? " native-app" : ""}`}>
       {smartContractWallet && (
         <div className="wallet-banner">
           <BlockiesSvg
             address={smartContractWallet}
             className="wallet-identicon"
           />
-          <span className="wallet-address mono">{smartContractWallet}</span>
+          <span className="wallet-address mono">
+            {truncateAddress(smartContractWallet)}
+          </span>
           <button
             className="copy-btn"
             onClick={() => copyAddress(smartContractWallet)}
@@ -255,9 +727,148 @@ function App() {
         </div>
       )}
       {credential ? (
-        <button className="btn btn-logout" onClick={logout}>
-          Logout
-        </button>
+        <div className="container logged-in-container">
+          {/* Balance Card */}
+          <div className="balance-card" style={{ marginTop: "24px" }}>
+            {isLoadingBalance && !balances ? (
+              <div className="balance-loading">
+                <div className="spinner small"></div>
+              </div>
+            ) : balances ? (
+              <div className="balance-amount">
+                <span className="balance-value">
+                  ${balances.usdc.formatted}
+                </span>
+                <span className="balance-symbol">USDC</span>
+              </div>
+            ) : (
+              <div className="balance-amount">
+                <span className="balance-value">--</span>
+                <span className="balance-symbol">USDC</span>
+              </div>
+            )}
+            {balances && (
+              <div className="balance-secondary">
+                {balances.eth.formatted} ETH
+              </div>
+            )}
+          </div>
+
+          {/* Transfer Form */}
+          <div className="transfer-card">
+            <div className="form-group">
+              <label htmlFor="recipient">Recipient Address</label>
+              <input
+                id="recipient"
+                type="text"
+                placeholder="0x..."
+                value={recipientAddress}
+                onChange={(e) => setRecipientAddress(e.target.value)}
+                disabled={isTransferring}
+                className="input-field"
+              />
+            </div>
+
+            <div className="form-group">
+              <div className="amount-header">
+                <label htmlFor="amount">Amount (USDC)</label>
+                <button
+                  className="max-btn"
+                  onClick={handleMaxAmount}
+                  disabled={isTransferring || !balances}
+                >
+                  MAX
+                </button>
+              </div>
+              <input
+                id="amount"
+                type="number"
+                placeholder="0.00"
+                value={transferAmount}
+                onChange={(e) => setTransferAmount(e.target.value)}
+                disabled={isTransferring}
+                className="input-field"
+                step="0.01"
+                min="0"
+              />
+            </div>
+
+            <button
+              className="btn btn-primary btn-send"
+              onClick={handleTransferUSDC}
+              disabled={
+                isTransferring ||
+                !recipientAddress ||
+                !transferAmount ||
+                parseFloat(transferAmount) <= 0
+              }
+            >
+              {isTransferring ? (
+                <>
+                  <div className="spinner small"></div>
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <span className="btn-icon">↗</span>
+                  Send USDC
+                </>
+              )}
+            </button>
+
+            {transferStatus && (
+              <div
+                className={`status-message ${
+                  transferStatus.includes("✓")
+                    ? "success"
+                    : transferStatus.includes("✗")
+                    ? "error"
+                    : "info"
+                }`}
+              >
+                {transferStatus}
+              </div>
+            )}
+
+            {transferTxHash && (
+              <a
+                href={`https://basescan.org/tx/${transferTxHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tx-link"
+              >
+                View transaction on Basescan →
+              </a>
+            )}
+          </div>
+
+          {/* Passkey Info */}
+          {!credential.qx && (
+            <div className="warning-card">
+              <p>
+                ⚠️ Passkey public key not available. Please generate a new
+                passkey to enable transfers.
+              </p>
+              <button
+                className="btn btn-secondary"
+                onClick={generatePasskey}
+                disabled={isLoading}
+              >
+                Regenerate Passkey
+              </button>
+            </div>
+          )}
+
+          <button className="btn btn-logout" onClick={logout}>
+            Logout
+          </button>
+          <button
+            className="passkey-details-link"
+            onClick={() => setShowPasskeyDetails(true)}
+          >
+            Passkey Details
+          </button>
+        </div>
       ) : (
         <div className="container">
           <div className="hero">
@@ -326,6 +937,95 @@ function App() {
               <div className="spinner"></div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Passkey Details Modal */}
+      {showPasskeyDetails && credential && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPasskeyDetails(false)}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Passkey Details</h3>
+              <button
+                className="modal-close"
+                onClick={() => setShowPasskeyDetails(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-content">
+              <div className="modal-field">
+                <label>Public Key X (Qx)</label>
+                <div className="modal-field-value">
+                  <span className="mono">
+                    {credential.qx || "Not available"}
+                  </span>
+                  {credential.qx && (
+                    <button
+                      className="copy-btn"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(credential.qx!);
+                        setCopiedField("qx");
+                        setTimeout(() => setCopiedField(null), 2000);
+                      }}
+                    >
+                      {copiedField === "qx" ? "✓" : "Copy"}
+                    </button>
+                  )}
+                </div>
+                <span className="field-hint">
+                  32-byte hex string (0x + 64 hex characters)
+                </span>
+              </div>
+
+              <div className="modal-field">
+                <label>Public Key Y (Qy)</label>
+                <div className="modal-field-value">
+                  <span className="mono">
+                    {credential.qy || "Not available"}
+                  </span>
+                  {credential.qy && (
+                    <button
+                      className="copy-btn"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(credential.qy!);
+                        setCopiedField("qy");
+                        setTimeout(() => setCopiedField(null), 2000);
+                      }}
+                    >
+                      {copiedField === "qy" ? "✓" : "Copy"}
+                    </button>
+                  )}
+                </div>
+                <span className="field-hint">
+                  32-byte hex string (0x + 64 hex characters)
+                </span>
+              </div>
+
+              <div className="modal-field">
+                <label>Credential ID (Base64URL)</label>
+                <div className="modal-field-value">
+                  <span className="mono">{credential.rawId}</span>
+                  <button
+                    className="copy-btn"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(credential.rawId);
+                      setCopiedField("rawId");
+                      setTimeout(() => setCopiedField(null), 2000);
+                    }}
+                  >
+                    {copiedField === "rawId" ? "✓" : "Copy"}
+                  </button>
+                </div>
+                <span className="field-hint">
+                  Base64URL-encoded credential identifier from the passkey
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
