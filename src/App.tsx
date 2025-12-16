@@ -1,7 +1,9 @@
 import React, { useState } from "react";
+import BlockiesSvg from "blockies-react-svg";
 import "./App.css";
 
-// Vercel domain for passkey association
+// Passkey configuration - RP ID must match associated domain for iOS app
+// This must match the domain in App.entitlements webcredentials
 const PASSKEY_RP_ID = "reactapp-sigma-lyart.vercel.app";
 const PASSKEY_RP_NAME = "Passkey Wallet";
 
@@ -33,6 +35,13 @@ function App() {
   const [credential, setCredential] = useState<PasskeyCredential | null>(null);
   const [status, setStatus] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
+
+  const copyAddress = async (address: string) => {
+    await navigator.clipboard.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const generatePasskey = async () => {
     setIsLoading(true);
@@ -148,38 +157,132 @@ function App() {
     }
   };
 
-  const disconnect = () => {
+  const logout = () => {
+    localStorage.removeItem("passkey_credential_id");
+    localStorage.removeItem("passkey_raw_id");
     setCredential(null);
     setStatus("");
   };
 
+  const smartContractWallet = process.env.REACT_APP_SMART_CONTRACT_WALLET;
+
   return (
     <div className="App">
-      <div className="container">
-        <div className="hero">
-          <div className="icon-container">
+      {smartContractWallet && (
+        <div className="wallet-banner">
+          <BlockiesSvg
+            address={smartContractWallet}
+            className="wallet-identicon"
+          />
+          <span className="wallet-address mono">{smartContractWallet}</span>
+          <button
+            className="copy-btn"
+            onClick={() => copyAddress(smartContractWallet)}
+            title={copied ? "Copied!" : "Copy address"}
+          >
+            {copied ? (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M20 6L9 17L4 12"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            ) : (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect
+                  x="9"
+                  y="9"
+                  width="13"
+                  height="13"
+                  rx="2"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M5 15H4C2.89543 15 2 14.1046 2 13V4C2 2.89543 2.89543 2 4 2H13C14.1046 2 15 2.89543 15 4V5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+              </svg>
+            )}
+          </button>
+          <a
+            href={`https://slopwallet.com/${smartContractWallet}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="external-link-btn"
+            title="View on SlopWallet"
+          >
             <svg
-              className="key-icon"
               viewBox="0 0 24 24"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
             >
               <path
-                d="M21 2L19 4M11.3891 11.6109C12.3844 12.6062 13 13.9812 13 15.5C13 18.5376 10.5376 21 7.5 21C4.46243 21 2 18.5376 2 15.5C2 12.4624 4.46243 10 7.5 10C9.01878 10 10.3938 10.6156 11.3891 11.6109ZM11.3891 11.6109L15.5 7.5M15.5 7.5L18.5 10.5L22 7L19 4M15.5 7.5L19 4"
+                d="M18 13V19C18 20.1046 17.1046 21 16 21H5C3.89543 21 3 20.1046 3 19V8C3 6.89543 3.89543 6 5 6H11"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M15 3H21V9"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M10 14L21 3"
                 stroke="currentColor"
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
             </svg>
-          </div>
-          <h1>Passkey Authentication</h1>
-          <p className="subtitle">
-            Secure, passwordless access using your device
-          </p>
+          </a>
         </div>
+      )}
+      {credential ? (
+        <button className="btn btn-logout" onClick={logout}>
+          Logout
+        </button>
+      ) : (
+        <div className="container">
+          <div className="hero">
+            <div className="icon-container">
+              <svg
+                className="key-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M21 2L19 4M11.3891 11.6109C12.3844 12.6062 13 13.9812 13 15.5C13 18.5376 10.5376 21 7.5 21C4.46243 21 2 18.5376 2 15.5C2 12.4624 4.46243 10 7.5 10C9.01878 10 10.3938 10.6156 11.3891 11.6109ZM11.3891 11.6109L15.5 7.5M15.5 7.5L18.5 10.5L22 7L19 4M15.5 7.5L19 4"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+            <h1>Passkey Authentication</h1>
+            <p className="subtitle">
+              Secure, passwordless access using your device
+            </p>
+          </div>
 
-        {!credential ? (
           <div className="auth-options">
             <button
               className="btn btn-primary"
@@ -203,52 +306,28 @@ function App() {
               Connect Existing Passkey
             </button>
           </div>
-        ) : (
-          <div className="credential-card">
-            <div className="credential-header">
-              <span className="status-dot"></span>
-              <span>Connected</span>
-            </div>
-            <div className="credential-details">
-              <div className="detail-row">
-                <span className="label">Credential ID</span>
-                <span className="value mono">
-                  {credential.id.slice(0, 20)}...
-                </span>
-              </div>
-              <div className="detail-row">
-                <span className="label">Raw ID</span>
-                <span className="value mono">
-                  {credential.rawId.slice(0, 20)}...
-                </span>
-              </div>
-            </div>
-            <button className="btn btn-disconnect" onClick={disconnect}>
-              Disconnect
-            </button>
-          </div>
-        )}
 
-        {status && (
-          <div
-            className={`status-message ${
-              status.includes("✓")
-                ? "success"
-                : status.includes("✗")
-                ? "error"
-                : "info"
-            }`}
-          >
-            {status}
-          </div>
-        )}
+          {status && (
+            <div
+              className={`status-message ${
+                status.includes("✓")
+                  ? "success"
+                  : status.includes("✗")
+                  ? "error"
+                  : "info"
+              }`}
+            >
+              {status}
+            </div>
+          )}
 
-        {isLoading && (
-          <div className="loading-indicator">
-            <div className="spinner"></div>
-          </div>
-        )}
-      </div>
+          {isLoading && (
+            <div className="loading-indicator">
+              <div className="spinner"></div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
