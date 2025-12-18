@@ -412,6 +412,10 @@ function App() {
         throw new Error("WebAuthn is not supported in this browser");
       }
 
+      if (!smartContractWallet) {
+        throw new Error("Smart contract wallet not configured");
+      }
+
       const challenge = generateRandomBytes(32);
 
       const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions =
@@ -427,9 +431,56 @@ function App() {
       })) as PublicKeyCredential;
 
       if (assertion) {
+        const assertionResponse =
+          assertion.response as AuthenticatorAssertionResponse;
+
+        // Parse the signature to get r and s values
+        const { r, s } = parseAsn1Signature(assertionResponse.signature);
+
+        setStatus("Verifying passkey...");
+
+        // Call the API to recover and verify the passkey
+        const recoverResponse = await fetch(
+          `${SLOPWALLET_API}/passkey/recover`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              wallet: smartContractWallet,
+              chainId: 8453,
+              signature: {
+                r: "0x" + r.toString(16).padStart(64, "0"),
+                s: "0x" + s.toString(16).padStart(64, "0"),
+              },
+              authenticatorData:
+                "0x" +
+                Array.from(new Uint8Array(assertionResponse.authenticatorData))
+                  .map((b) => b.toString(16).padStart(2, "0"))
+                  .join(""),
+              clientDataJSON: new TextDecoder().decode(
+                assertionResponse.clientDataJSON
+              ),
+            }),
+          }
+        );
+
+        const recoverData = await recoverResponse.json();
+
+        if (recoverData.error) {
+          throw new Error(
+            "Passkey not authorized. Please use a passkey that has been added to this wallet."
+          );
+        }
+
+        // Save the recovered qx/qy to localStorage
+        localStorage.setItem("passkey_qx", recoverData.qx);
+        localStorage.setItem("passkey_qy", recoverData.qy);
+
         const passkeyData: PasskeyCredential = {
           id: assertion.id,
           rawId: bufferToBase64url(assertion.rawId),
+          qx: recoverData.qx,
+          qy: recoverData.qy,
           createdAt: new Date(),
         };
 
@@ -852,22 +903,6 @@ function App() {
           </div>
 
           {/* Passkey Info */}
-          {!credential.qx && (
-            <div className="warning-card">
-              <p>
-                ⚠️ Passkey public key not available. Please generate a new
-                passkey to enable transfers.
-              </p>
-              <button
-                className="btn btn-secondary"
-                onClick={generatePasskey}
-                disabled={isLoading}
-              >
-                Regenerate Passkey
-              </button>
-            </div>
-          )}
-
           <button className="btn btn-logout" onClick={logout}>
             Logout
           </button>
