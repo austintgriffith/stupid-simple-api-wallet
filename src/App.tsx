@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
 import BlockiesSvg from "blockies-react-svg";
-import { keccak256, concat, toHex } from "viem";
 import "./App.css";
 
 // Passkey configuration - RP ID must match associated domain for iOS app
@@ -13,7 +12,7 @@ const PASSKEY_RP_NAME = "Slop Wallet Mobile";
 
 // SlopWallet API configuration
 const SLOPWALLET_API = "https://slopwallet.com/api";
-const BASE_CHAIN_ID = BigInt(8453);
+const BASE_CHAIN_ID = 8453;
 
 // Balance response interface
 interface BalanceResponse {
@@ -24,17 +23,17 @@ interface BalanceResponse {
   };
 }
 
-// Transfer calldata response interface
-interface TransferResponse {
+// Prepare transfer response interface
+interface PrepareTransferResponse {
   success: boolean;
-  asset: string;
-  amount: string;
-  to: string;
   call: {
     target: string;
     value: string;
     data: string;
   };
+  nonce: string;
+  deadline: string;
+  challengeHash: string;
 }
 
 // WebAuthn auth data for relay
@@ -71,29 +70,6 @@ interface PasskeyCredential {
   qx?: string;
   qy?: string;
   createdAt: Date;
-}
-
-// Build challenge hash for signing
-function buildChallengeHash(
-  chainId: bigint,
-  walletAddress: `0x${string}`,
-  target: `0x${string}`,
-  value: bigint,
-  data: `0x${string}`,
-  nonce: bigint,
-  deadline: bigint
-): `0x${string}` {
-  return keccak256(
-    concat([
-      toHex(chainId, { size: 32 }),
-      walletAddress,
-      target,
-      toHex(value, { size: 32 }),
-      data,
-      toHex(nonce, { size: 32 }),
-      toHex(deadline, { size: 32 }),
-    ])
-  );
 }
 
 // Parse ASN.1 DER signature to extract r and s values
@@ -518,53 +494,37 @@ function App() {
     }
 
     setIsTransferring(true);
-    setTransferStatus("Getting transfer data...");
+    setTransferStatus("Preparing transfer...");
     setTransferTxHash(null);
 
     try {
-      // Step 1: Get transfer calldata from API
-      const transferResponse = await fetch(`${SLOPWALLET_API}/transfer`, {
+      // Step 1: Get all transfer data in a single call
+      const prepareResponse = await fetch(`${SLOPWALLET_API}/prepare-transfer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          chainId: BASE_CHAIN_ID,
+          wallet: smartContractWallet,
+          qx: credential.qx,
+          qy: credential.qy,
           asset: "USDC",
           amount: transferAmount,
           to: recipientAddress,
         }),
       });
 
-      const transferData: TransferResponse = await transferResponse.json();
-      if (!transferData.success) {
-        throw new Error("Failed to get transfer calldata");
+      const prepareData: PrepareTransferResponse = await prepareResponse.json();
+      if (!prepareData.success) {
+        throw new Error("Failed to prepare transfer");
       }
-
-      // Fetch current nonce from API
-      const nonceResponse = await fetch(
-        `${SLOPWALLET_API}/nonce?wallet=${smartContractWallet}&qx=${credential.qx}&qy=${credential.qy}`
-      );
-      const nonceData = await nonceResponse.json();
-      if (!nonceData.nonce && nonceData.nonce !== "0") {
-        throw new Error("Failed to fetch nonce");
-      }
-      const nonce = BigInt(nonceData.nonce);
 
       setTransferStatus("Please sign with passkey...");
 
-      // Step 2: Build challenge hash and sign with passkey
-      const target = transferData.call.target as `0x${string}`;
-      const value = BigInt(transferData.call.value);
-      const data = transferData.call.data as `0x${string}`;
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
-
-      const challengeHash = buildChallengeHash(
-        BASE_CHAIN_ID,
-        smartContractWallet as `0x${string}`,
-        target,
-        value,
-        data,
-        nonce,
-        deadline
-      );
+      // Extract data from response
+      const { call, deadline, challengeHash } = prepareData;
+      const target = call.target as `0x${string}`;
+      const value = call.value;
+      const data = call.data as `0x${string}`;
 
       // Convert challenge hash to bytes for WebAuthn
       const challengeBytes = new Uint8Array(
@@ -635,24 +595,24 @@ function App() {
 
       setTransferStatus("Submitting transaction...");
 
-      // Step 3: Submit to relay/facilitator
+      // Step 2: Submit to relay/facilitator
       const facilitateResponse = await fetch(`${SLOPWALLET_API}/facilitate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           smartWalletAddress: smartContractWallet,
-          chainId: Number(BASE_CHAIN_ID),
+          chainId: BASE_CHAIN_ID,
           isBatch: false,
           calls: [
             {
               target,
-              value: value.toString(),
+              value,
               data,
             },
           ],
           qx: credential.qx,
           qy: credential.qy,
-          deadline: deadline.toString(),
+          deadline,
           auth,
         }),
       });
