@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import BlockiesSvg from "blockies-react-svg";
+import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 
 // Passkey configuration - RP ID must match associated domain for iOS app
@@ -213,12 +214,133 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+// Common TLDs that might be used with ENS (DNSSEC-enabled domains)
+// This avoids triggering on partial input like ".et" while typing ".eth"
+const VALID_ENS_TLDS = new Set([
+  // Native ENS
+  "eth",
+  // Common generic TLDs
+  "com",
+  "org",
+  "net",
+  "io",
+  "co",
+  "xyz",
+  "app",
+  "dev",
+  "ai",
+  "id",
+  "me",
+  "tv",
+  "cc",
+  "gg",
+  "fm",
+  "im",
+  "to",
+  // Country codes that are commonly used
+  "uk",
+  "de",
+  "nl",
+  "fr",
+  "es",
+  "it",
+  "jp",
+  "kr",
+  "au",
+  "ca",
+  "ch",
+  "se",
+  "no",
+  "fi",
+  "pl",
+  "cz",
+  "at",
+  "be",
+  "nz",
+  // Newer/popular TLDs
+  "club",
+  "online",
+  "site",
+  "tech",
+  "store",
+  "blog",
+  "info",
+  "biz",
+  "pro",
+  "name",
+  "link",
+  "click",
+  "space",
+  "world",
+  "life",
+  "live",
+  "news",
+  "art",
+  "box",
+  "kred",
+  "luxe",
+]);
+
+/**
+ * Check if input looks like a potential ENS name.
+ * Supports: .eth names, DNS domains with common TLDs, and subdomains.
+ */
+function isPotentialENSName(input: string): boolean {
+  if (!input || input.length < 3) return false;
+
+  const trimmed = input.trim().toLowerCase();
+
+  // Skip Ethereum addresses
+  if (trimmed.startsWith("0x") && trimmed.length === 42) return false;
+
+  // Must have at least one dot
+  const lastDot = trimmed.lastIndexOf(".");
+  if (lastDot === -1) return false;
+
+  // Extract the TLD and check against our list
+  const tld = trimmed.slice(lastDot + 1);
+  return VALID_ENS_TLDS.has(tld);
+}
+
+/**
+ * Resolve an ENS name to an Ethereum address using the SlopWallet API.
+ */
+const resolveENS = async (name: string): Promise<string | null> => {
+  try {
+    const response = await fetch(
+      `${SLOPWALLET_API}/ens?query=${encodeURIComponent(name)}`
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.address || null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Reverse resolve an Ethereum address to an ENS name using the SlopWallet API.
+ */
+const reverseResolveENS = async (address: string): Promise<string | null> => {
+  try {
+    const response = await fetch(
+      `${SLOPWALLET_API}/ens?query=${encodeURIComponent(address)}`
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.ensName || null;
+  } catch {
+    return null;
+  }
+};
+
 function App() {
   const [credential, setCredential] = useState<PasskeyCredential | null>(null);
   const [status, setStatus] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [showPasskeyDetails, setShowPasskeyDetails] = useState<boolean>(false);
+  const [showQRModal, setShowQRModal] = useState<boolean>(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Balance state
@@ -233,6 +355,19 @@ function App() {
   const [isTransferring, setIsTransferring] = useState<boolean>(false);
   const [transferStatus, setTransferStatus] = useState<string>("");
   const [transferTxHash, setTransferTxHash] = useState<string | null>(null);
+
+  // ENS resolution state
+  const [ensResolvedAddress, setEnsResolvedAddress] = useState<string | null>(
+    null
+  );
+  const [isResolvingENS, setIsResolvingENS] = useState<boolean>(false);
+  const [ensError, setEnsError] = useState<boolean>(false);
+
+  // Success toast state
+  const [showSuccessToast, setShowSuccessToast] = useState<boolean>(false);
+
+  // Wallet ENS name state (reverse lookup)
+  const [walletEnsName, setWalletEnsName] = useState<string | null>(null);
 
   const smartContractWallet = process.env.REACT_APP_SMART_CONTRACT_WALLET;
 
@@ -280,6 +415,56 @@ function App() {
       return () => clearInterval(interval);
     }
   }, [credential, smartContractWallet, fetchBalances]);
+
+  // Fetch ENS name for wallet on page load (reverse lookup)
+  useEffect(() => {
+    if (smartContractWallet) {
+      reverseResolveENS(smartContractWallet).then(setWalletEnsName);
+    }
+  }, [smartContractWallet]);
+
+  // ENS resolution with debounce
+  useEffect(() => {
+    const input = recipientAddress.trim();
+
+    // Reset if not a potential ENS name
+    if (!isPotentialENSName(input)) {
+      setEnsResolvedAddress(null);
+      setEnsError(false);
+      setIsResolvingENS(false);
+      return;
+    }
+
+    setIsResolvingENS(true);
+    setEnsError(false);
+
+    const timeout = setTimeout(async () => {
+      const resolved = await resolveENS(input);
+      setEnsResolvedAddress(resolved);
+      setEnsError(!resolved);
+      setIsResolvingENS(false);
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeout);
+  }, [recipientAddress]);
+
+  // Auto-dismiss success toast after 10 seconds
+  useEffect(() => {
+    if (showSuccessToast) {
+      const timeout = setTimeout(() => {
+        setShowSuccessToast(false);
+        setTransferStatus("");
+        setTransferTxHash(null);
+      }, 10000);
+      return () => clearTimeout(timeout);
+    }
+  }, [showSuccessToast]);
+
+  const dismissSuccessToast = () => {
+    setShowSuccessToast(false);
+    setTransferStatus("");
+    setTransferTxHash(null);
+  };
 
   const copyAddress = async (address: string) => {
     await navigator.clipboard.writeText(address);
@@ -476,13 +661,22 @@ function App() {
 
   // Transfer USDC using 3-step API flow
   const handleTransferUSDC = async () => {
+    // Use ENS resolved address if available, otherwise use input directly
+    const finalRecipient = ensResolvedAddress || recipientAddress;
+
     if (
       !credential ||
       !smartContractWallet ||
-      !recipientAddress ||
+      !finalRecipient ||
       !transferAmount
     ) {
       setTransferStatus("✗ Missing required fields");
+      return;
+    }
+
+    // Validate that we have a valid address
+    if (!finalRecipient.startsWith("0x") || finalRecipient.length !== 42) {
+      setTransferStatus("✗ Invalid recipient address");
       return;
     }
 
@@ -499,19 +693,22 @@ function App() {
 
     try {
       // Step 1: Get all transfer data in a single call
-      const prepareResponse = await fetch(`${SLOPWALLET_API}/prepare-transfer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chainId: BASE_CHAIN_ID,
-          wallet: smartContractWallet,
-          qx: credential.qx,
-          qy: credential.qy,
-          asset: "USDC",
-          amount: transferAmount,
-          to: recipientAddress,
-        }),
-      });
+      const prepareResponse = await fetch(
+        `${SLOPWALLET_API}/prepare-transfer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chainId: BASE_CHAIN_ID,
+            wallet: smartContractWallet,
+            qx: credential.qx,
+            qy: credential.qy,
+            asset: "USDC",
+            amount: transferAmount,
+            to: finalRecipient,
+          }),
+        }
+      );
 
       const prepareData: PrepareTransferResponse = await prepareResponse.json();
       if (!prepareData.success) {
@@ -622,6 +819,7 @@ function App() {
       if (facilitateData.success && facilitateData.txHash) {
         setTransferTxHash(facilitateData.txHash);
         setTransferStatus("✓ Transfer complete!");
+        setShowSuccessToast(true);
         setRecipientAddress("");
         setTransferAmount("");
         // Refresh balances
@@ -664,13 +862,21 @@ function App() {
             address={smartContractWallet}
             className="wallet-identicon"
           />
-          <span className="wallet-address mono">
-            {truncateAddress(smartContractWallet)}
-          </span>
+          <div className="wallet-info">
+            <span className="wallet-name mono">
+              {walletEnsName || truncateAddress(smartContractWallet)}
+            </span>
+            {walletEnsName && (
+              <span className="wallet-address-subtitle mono">
+                {truncateAddress(smartContractWallet)}
+              </span>
+            )}
+          </div>
           <button
             className="copy-btn"
             onClick={() => copyAddress(smartContractWallet)}
             title={copied ? "Copied!" : "Copy address"}
+            tabIndex={-1}
           >
             {copied ? (
               <svg
@@ -709,12 +915,57 @@ function App() {
               </svg>
             )}
           </button>
+          <button
+            className="qr-btn"
+            onClick={() => setShowQRModal(true)}
+            title="Show QR code"
+            tabIndex={-1}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect
+                x="3"
+                y="3"
+                width="7"
+                height="7"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+              <rect
+                x="14"
+                y="3"
+                width="7"
+                height="7"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+              <rect
+                x="3"
+                y="14"
+                width="7"
+                height="7"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+              <rect x="14" y="14" width="3" height="3" fill="currentColor" />
+              <rect x="18" y="14" width="3" height="3" fill="currentColor" />
+              <rect x="14" y="18" width="3" height="3" fill="currentColor" />
+              <rect x="18" y="18" width="3" height="3" fill="currentColor" />
+            </svg>
+          </button>
           <a
             href={`https://slopwallet.com/${smartContractWallet}`}
             target="_blank"
             rel="noopener noreferrer"
             className="external-link-btn"
             title="View on SlopWallet"
+            tabIndex={-1}
           >
             <svg
               viewBox="0 0 24 24"
@@ -781,12 +1032,88 @@ function App() {
               <input
                 id="recipient"
                 type="text"
-                placeholder="0x..."
+                placeholder="0x... or ENS name"
                 value={recipientAddress}
                 onChange={(e) => setRecipientAddress(e.target.value)}
                 disabled={isTransferring}
                 className="input-field"
               />
+              {isResolvingENS && (
+                <div className="ens-status resolving">Resolving ENS...</div>
+              )}
+              {ensResolvedAddress && (
+                <div className="ens-status resolved">
+                  <span className="ens-resolved-address">
+                    → {truncateAddress(ensResolvedAddress)}
+                  </span>
+                  <button
+                    className="ens-action-btn"
+                    onClick={() => {
+                      navigator.clipboard.writeText(ensResolvedAddress);
+                    }}
+                    title="Copy address"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <rect
+                        x="9"
+                        y="9"
+                        width="13"
+                        height="13"
+                        rx="2"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      />
+                      <path
+                        d="M5 15H4C2.89543 15 2 14.1046 2 13V4C2 2.89543 2.89543 2 4 2H13C14.1046 2 15 2.89543 15 4V5"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      />
+                    </svg>
+                  </button>
+                  <a
+                    href={`https://blockscan.com/address/${ensResolvedAddress}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ens-action-btn"
+                    title="View on Blockscan"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path
+                        d="M18 13V19C18 20.1046 17.1046 21 16 21H5C3.89543 21 3 20.1046 3 19V8C3 6.89543 3.89543 6 5 6H11"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M15 3H21V9"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M10 14L21 3"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </a>
+                </div>
+              )}
+              {ensError && (
+                <div className="ens-status error">ENS name not found</div>
+              )}
             </div>
 
             <div className="form-group">
@@ -796,6 +1123,7 @@ function App() {
                   className="max-btn"
                   onClick={handleMaxAmount}
                   disabled={isTransferring || !balances}
+                  tabIndex={-1}
                 >
                   MAX
                 </button>
@@ -820,7 +1148,9 @@ function App() {
                 isTransferring ||
                 !recipientAddress ||
                 !transferAmount ||
-                parseFloat(transferAmount) <= 0
+                parseFloat(transferAmount) <= 0 ||
+                isResolvingENS ||
+                (isPotentialENSName(recipientAddress) && !ensResolvedAddress)
               }
             >
               {isTransferring ? (
@@ -836,29 +1166,14 @@ function App() {
               )}
             </button>
 
-            {transferStatus && (
+            {transferStatus && !showSuccessToast && (
               <div
                 className={`status-message ${
-                  transferStatus.includes("✓")
-                    ? "success"
-                    : transferStatus.includes("✗")
-                    ? "error"
-                    : "info"
+                  transferStatus.includes("✗") ? "error" : "info"
                 }`}
               >
                 {transferStatus}
               </div>
-            )}
-
-            {transferTxHash && (
-              <a
-                href={`https://basescan.org/tx/${transferTxHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="tx-link"
-              >
-                View transaction on Basescan →
-              </a>
             )}
           </div>
 
@@ -941,6 +1256,60 @@ function App() {
               <div className="spinner"></div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* QR Code Modal */}
+      {showQRModal && smartContractWallet && (
+        <div className="modal-overlay" onClick={() => setShowQRModal(false)}>
+          <div className="modal qr-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header qr-modal-header">
+              <div className="qr-modal-identity">
+                <BlockiesSvg
+                  address={smartContractWallet}
+                  className="qr-modal-identicon"
+                />
+                <div className="qr-modal-info">
+                  <span className="qr-modal-name mono">
+                    {walletEnsName || truncateAddress(smartContractWallet)}
+                  </span>
+                  {walletEnsName && (
+                    <span className="qr-modal-address-subtitle mono">
+                      {truncateAddress(smartContractWallet)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                className="modal-close"
+                onClick={() => setShowQRModal(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-content qr-modal-content">
+              <div className="qr-code-container">
+                <QRCodeSVG
+                  value={smartContractWallet}
+                  size={256}
+                  level="H"
+                  includeMargin={true}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                />
+              </div>
+              <div className="qr-full-address mono">{smartContractWallet}</div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  copyAddress(smartContractWallet);
+                  setShowQRModal(false);
+                }}
+              >
+                Copy Address
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1029,6 +1398,26 @@ function App() {
                 </span>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Toast */}
+      {showSuccessToast && transferTxHash && (
+        <div className="success-toast">
+          <button className="toast-close" onClick={dismissSuccessToast}>
+            ×
+          </button>
+          <div className="toast-content">
+            <div className="toast-title">✓ Transfer complete!</div>
+            <a
+              href={`https://basescan.org/tx/${transferTxHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="toast-link"
+            >
+              View transaction on Basescan →
+            </a>
           </div>
         </div>
       )}

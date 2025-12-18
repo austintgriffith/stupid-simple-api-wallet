@@ -83,6 +83,27 @@ body {
   font-size: 0.85rem;
 }
 
+.wallet-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.wallet-name {
+  color: var(--accent-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.wallet-address-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.65rem;
+  opacity: 0.7;
+  line-height: 1;
+  margin-top: -10px;
+}
+
 .copy-btn {
   background: transparent;
   border: none;
@@ -106,7 +127,8 @@ body {
   height: 16px;
 }
 
-.external-link-btn {
+.external-link-btn,
+.qr-btn {
   color: var(--text-secondary);
   padding: 4px;
   display: flex;
@@ -116,12 +138,20 @@ body {
   transition: all 0.2s ease;
 }
 
-.external-link-btn:hover {
+.qr-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.external-link-btn:hover,
+.qr-btn:hover {
   color: var(--accent-primary);
   background: rgba(0, 212, 170, 0.1);
 }
 
-.external-link-btn svg {
+.external-link-btn svg,
+.qr-btn svg {
   width: 16px;
   height: 16px;
 }
@@ -620,6 +650,125 @@ h1 {
   cursor: not-allowed;
 }
 
+/* ENS Status */
+.ens-status {
+  font-size: 0.85rem;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  animation: fadeIn 0.2s ease;
+}
+
+.ens-status.resolving {
+  color: var(--text-secondary);
+  background: rgba(136, 136, 160, 0.1);
+}
+
+.ens-status.resolved {
+  color: var(--success);
+  background: rgba(0, 212, 170, 0.1);
+  font-family: "JetBrains Mono", monospace;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ens-resolved-address {
+  flex: 1;
+}
+
+.ens-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--success);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  opacity: 0.7;
+  text-decoration: none;
+}
+
+.ens-action-btn:hover {
+  opacity: 1;
+  background: rgba(0, 212, 170, 0.2);
+}
+
+.ens-action-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ens-status.error {
+  color: var(--error);
+  background: rgba(255, 77, 106, 0.1);
+}
+
+/* Success Toast */
+.success-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  border: 1px solid var(--success);
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 8px 32px rgba(0, 212, 170, 0.3),
+    0 0 0 1px rgba(0, 212, 170, 0.2);
+  z-index: 1000;
+  animation: slideUp 0.3s ease, fadeIn 0.3s ease;
+  max-width: 90%;
+  width: 360px;
+}
+
+.toast-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.toast-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast-title {
+  color: var(--success);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.toast-link {
+  color: var(--accent-primary);
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: opacity 0.2s ease;
+}
+
+.toast-link:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
 .btn-send {
   width: 100%;
   margin-top: 8px;
@@ -802,6 +951,81 @@ h1 {
   font-size: 0.65rem;
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* QR Code Modal */
+.qr-modal {
+  max-width: 400px;
+}
+
+.qr-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.qr-modal-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.qr-modal-identicon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.qr-modal-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.qr-modal-name {
+  color: var(--accent-primary);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.qr-modal-address-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  opacity: 0.7;
+  line-height: 1.2;
+}
+
+.qr-modal-content {
+  align-items: center;
+  text-align: center;
+}
+
+.qr-code-container {
+  background: #ffffff;
+  padding: 16px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-full-address {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  width: 100%;
+  line-height: 1.4;
+}
+
+.qr-modal-content .btn {
+  width: 100%;
 }
 
 /* Mobile adjustments */
