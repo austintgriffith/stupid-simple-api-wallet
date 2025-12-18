@@ -1,338 +1,39 @@
 import React, { useState, useEffect, useCallback } from "react";
-import BlockiesSvg from "blockies-react-svg";
-import { QRCodeSVG } from "qrcode.react";
 import "./App.css";
 
-// Passkey configuration - RP ID must match associated domain for iOS app
-// Use the production domain when in Capacitor native app, otherwise use current hostname
-const isNativeApp = !!(window as any).Capacitor?.isNativePlatform?.();
-const PASSKEY_RP_ID = isNativeApp
-  ? "reactapp-sigma-lyart.vercel.app" // Must match App.entitlements webcredentials
-  : window.location.hostname;
-const PASSKEY_RP_NAME = "Slop Wallet Mobile";
+// Config
+import {
+  isNativeApp,
+  PASSKEY_RP_ID,
+  PASSKEY_RP_NAME,
+  SLOPWALLET_API,
+  BASE_CHAIN_ID,
+} from "./config";
 
-// SlopWallet API configuration
-const SLOPWALLET_API = "https://slopwallet.com/api";
-const BASE_CHAIN_ID = 8453;
+// Types
+import {
+  BalanceResponse,
+  PrepareTransferResponse,
+  WebAuthnAuth,
+  PasskeyCredential,
+} from "./types";
 
-// Balance response interface
-interface BalanceResponse {
-  address: string;
-  balances: {
-    eth: { raw: string; formatted: string; symbol: string; decimals: number };
-    usdc: { raw: string; formatted: string; symbol: string; decimals: number };
-  };
-}
+// Utils
+import {
+  generateRandomBytes,
+  bufferToBase64url,
+  parseAsn1Signature,
+  normalizeS,
+  extractPublicKeyFromSpki,
+} from "./utils/crypto";
+import { isPotentialENSName, resolveENS, reverseResolveENS } from "./utils/ens";
+import { truncateAddress } from "./utils/format";
 
-// Prepare transfer response interface
-interface PrepareTransferResponse {
-  success: boolean;
-  call: {
-    target: string;
-    value: string;
-    data: string;
-  };
-  nonce: string;
-  deadline: string;
-  challengeHash: string;
-}
-
-// WebAuthn auth data for relay
-interface WebAuthnAuth {
-  r: string;
-  s: string;
-  challengeIndex: string;
-  typeIndex: string;
-  authenticatorData: string;
-  clientDataJSON: string;
-}
-
-// Helper to generate random bytes
-function generateRandomBytes(length: number): ArrayBuffer {
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  return array.buffer as ArrayBuffer;
-}
-
-// Helper to convert ArrayBuffer to base64url string
-function bufferToBase64url(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-
-interface PasskeyCredential {
-  id: string;
-  rawId: string;
-  publicKey?: string;
-  qx?: string;
-  qy?: string;
-  createdAt: Date;
-}
-
-// Parse ASN.1 DER signature to extract r and s values
-function parseAsn1Signature(signature: ArrayBuffer): { r: bigint; s: bigint } {
-  const bytes = new Uint8Array(signature);
-  let offset = 0;
-
-  // Check for SEQUENCE tag (0x30)
-  if (bytes[offset++] !== 0x30) {
-    throw new Error("Invalid ASN.1 signature: expected SEQUENCE");
-  }
-
-  // Skip sequence length
-  let seqLen = bytes[offset++];
-  if (seqLen & 0x80) {
-    offset += seqLen & 0x7f;
-  }
-
-  // Parse r INTEGER
-  if (bytes[offset++] !== 0x02) {
-    throw new Error("Invalid ASN.1 signature: expected INTEGER for r");
-  }
-  let rLen = bytes[offset++];
-  let rBytes = bytes.slice(offset, offset + rLen);
-  offset += rLen;
-  // Remove leading zero if present (for positive number representation)
-  if (rBytes[0] === 0x00 && rBytes.length > 32) {
-    rBytes = rBytes.slice(1);
-  }
-
-  // Parse s INTEGER
-  if (bytes[offset++] !== 0x02) {
-    throw new Error("Invalid ASN.1 signature: expected INTEGER for s");
-  }
-  let sLen = bytes[offset++];
-  let sBytes = bytes.slice(offset, offset + sLen);
-  // Remove leading zero if present
-  if (sBytes[0] === 0x00 && sBytes.length > 32) {
-    sBytes = sBytes.slice(1);
-  }
-
-  // Pad to 32 bytes if needed
-  const rPadded = new Uint8Array(32);
-  const sPadded = new Uint8Array(32);
-  rPadded.set(rBytes, 32 - rBytes.length);
-  sPadded.set(sBytes, 32 - sBytes.length);
-
-  const r = BigInt(
-    "0x" +
-      Array.from(rPadded)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")
-  );
-  const s = BigInt(
-    "0x" +
-      Array.from(sPadded)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")
-  );
-
-  return { r, s };
-}
-
-// Normalize s value to low-s form (required by secp256r1)
-function normalizeS(s: bigint): bigint {
-  const curveOrder = BigInt(
-    "0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551"
-  );
-  const halfOrder = curveOrder / BigInt(2);
-  return s > halfOrder ? curveOrder - s : s;
-}
-
-// Extract public key coordinates from SPKI format (what getPublicKey() returns)
-function extractPublicKeyFromSpki(spkiKey: ArrayBuffer): {
-  qx: `0x${string}`;
-  qy: `0x${string}`;
-} {
-  const bytes = new Uint8Array(spkiKey);
-
-  // SPKI format for EC P-256:
-  // - ASN.1 header (variable length, typically 26-27 bytes)
-  // - 0x04 (uncompressed point indicator)
-  // - X coordinate (32 bytes)
-  // - Y coordinate (32 bytes)
-  // Total: header + 65 bytes for the point
-
-  // The last 65 bytes contain: 0x04 + X (32) + Y (32)
-  if (bytes.length < 65) {
-    throw new Error("SPKI key too short");
-  }
-
-  // Find the uncompressed point marker (0x04) followed by 64 bytes
-  let pointStart = -1;
-  for (let i = 0; i < bytes.length - 64; i++) {
-    if (bytes[i] === 0x04) {
-      // Verify this looks like a valid position (near the end)
-      if (bytes.length - i === 65) {
-        pointStart = i;
-        break;
-      }
-    }
-  }
-
-  if (pointStart === -1) {
-    // Fallback: assume last 64 bytes are X and Y (without 0x04 marker)
-    // This can happen with some key formats
-    const qx = bytes.slice(bytes.length - 64, bytes.length - 32);
-    const qy = bytes.slice(bytes.length - 32);
-
-    return {
-      qx: ("0x" +
-        Array.from(qx)
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("")) as `0x${string}`,
-      qy: ("0x" +
-        Array.from(qy)
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("")) as `0x${string}`,
-    };
-  }
-
-  // Skip 0x04 marker and extract X and Y
-  const qx = bytes.slice(pointStart + 1, pointStart + 33);
-  const qy = bytes.slice(pointStart + 33, pointStart + 65);
-
-  return {
-    qx: ("0x" +
-      Array.from(qx)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")) as `0x${string}`,
-    qy: ("0x" +
-      Array.from(qy)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")) as `0x${string}`,
-  };
-}
-
-// Helper to truncate address for display (0x1234...5678)
-function truncateAddress(address: string): string {
-  if (address.length <= 10) return address;
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
-// Common TLDs that might be used with ENS (DNSSEC-enabled domains)
-// This avoids triggering on partial input like ".et" while typing ".eth"
-const VALID_ENS_TLDS = new Set([
-  // Native ENS
-  "eth",
-  // Common generic TLDs
-  "com",
-  "org",
-  "net",
-  "io",
-  "co",
-  "xyz",
-  "app",
-  "dev",
-  "ai",
-  "id",
-  "me",
-  "tv",
-  "cc",
-  "gg",
-  "fm",
-  "im",
-  "to",
-  // Country codes that are commonly used
-  "uk",
-  "de",
-  "nl",
-  "fr",
-  "es",
-  "it",
-  "jp",
-  "kr",
-  "au",
-  "ca",
-  "ch",
-  "se",
-  "no",
-  "fi",
-  "pl",
-  "cz",
-  "at",
-  "be",
-  "nz",
-  // Newer/popular TLDs
-  "club",
-  "online",
-  "site",
-  "tech",
-  "store",
-  "blog",
-  "info",
-  "biz",
-  "pro",
-  "name",
-  "link",
-  "click",
-  "space",
-  "world",
-  "life",
-  "live",
-  "news",
-  "art",
-  "box",
-  "kred",
-  "luxe",
-]);
-
-/**
- * Check if input looks like a potential ENS name.
- * Supports: .eth names, DNS domains with common TLDs, and subdomains.
- */
-function isPotentialENSName(input: string): boolean {
-  if (!input || input.length < 3) return false;
-
-  const trimmed = input.trim().toLowerCase();
-
-  // Skip Ethereum addresses
-  if (trimmed.startsWith("0x") && trimmed.length === 42) return false;
-
-  // Must have at least one dot
-  const lastDot = trimmed.lastIndexOf(".");
-  if (lastDot === -1) return false;
-
-  // Extract the TLD and check against our list
-  const tld = trimmed.slice(lastDot + 1);
-  return VALID_ENS_TLDS.has(tld);
-}
-
-/**
- * Resolve an ENS name to an Ethereum address using the SlopWallet API.
- */
-const resolveENS = async (name: string): Promise<string | null> => {
-  try {
-    const response = await fetch(
-      `${SLOPWALLET_API}/ens?query=${encodeURIComponent(name)}`
-    );
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.address || null;
-  } catch {
-    return null;
-  }
-};
-
-/**
- * Reverse resolve an Ethereum address to an ENS name using the SlopWallet API.
- */
-const reverseResolveENS = async (address: string): Promise<string | null> => {
-  try {
-    const response = await fetch(
-      `${SLOPWALLET_API}/ens?query=${encodeURIComponent(address)}`
-    );
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.ensName || null;
-  } catch {
-    return null;
-  }
-};
+// Components
+import { WalletHeader } from "./components/WalletHeader";
+import { QRModal } from "./components/QRModal";
+import { PasskeyDetailsModal } from "./components/PasskeyDetailsModal";
+import { SuccessToast } from "./components/SuccessToast";
 
 function App() {
   const [credential, setCredential] = useState<PasskeyCredential | null>(null);
@@ -341,7 +42,6 @@ function App() {
   const [copied, setCopied] = useState<boolean>(false);
   const [showPasskeyDetails, setShowPasskeyDetails] = useState<boolean>(false);
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Balance state
   const [balances, setBalances] = useState<BalanceResponse["balances"] | null>(
@@ -858,20 +558,11 @@ function App() {
     <div className={`App${isNativeApp ? " native-app" : ""}`}>
       {smartContractWallet && (
         <div className="wallet-banner">
-          <BlockiesSvg
+          <WalletHeader
             address={smartContractWallet}
-            className="wallet-identicon"
+            ensName={walletEnsName}
+            variant="banner"
           />
-          <div className="wallet-info">
-            <span className="wallet-name mono">
-              {walletEnsName || truncateAddress(smartContractWallet)}
-            </span>
-            {walletEnsName && (
-              <span className="wallet-address-subtitle mono">
-                {truncateAddress(smartContractWallet)}
-              </span>
-            )}
-          </div>
           <button
             className="copy-btn"
             onClick={() => copyAddress(smartContractWallet)}
@@ -1261,165 +952,25 @@ function App() {
 
       {/* QR Code Modal */}
       {showQRModal && smartContractWallet && (
-        <div className="modal-overlay" onClick={() => setShowQRModal(false)}>
-          <div className="modal qr-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header qr-modal-header">
-              <div className="qr-modal-identity">
-                <BlockiesSvg
-                  address={smartContractWallet}
-                  className="qr-modal-identicon"
-                />
-                <div className="qr-modal-info">
-                  <span className="qr-modal-name mono">
-                    {walletEnsName || truncateAddress(smartContractWallet)}
-                  </span>
-                  {walletEnsName && (
-                    <span className="qr-modal-address-subtitle mono">
-                      {truncateAddress(smartContractWallet)}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                className="modal-close"
-                onClick={() => setShowQRModal(false)}
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-content qr-modal-content">
-              <div className="qr-code-container">
-                <QRCodeSVG
-                  value={smartContractWallet}
-                  size={256}
-                  level="H"
-                  includeMargin={true}
-                  bgColor="#ffffff"
-                  fgColor="#000000"
-                />
-              </div>
-              <div className="qr-full-address mono">{smartContractWallet}</div>
-              <button
-                className="btn btn-secondary"
-                onClick={() => {
-                  copyAddress(smartContractWallet);
-                  setShowQRModal(false);
-                }}
-              >
-                Copy Address
-              </button>
-            </div>
-          </div>
-        </div>
+        <QRModal
+          address={smartContractWallet}
+          ensName={walletEnsName}
+          onClose={() => setShowQRModal(false)}
+          onCopyAddress={copyAddress}
+        />
       )}
 
       {/* Passkey Details Modal */}
       {showPasskeyDetails && credential && (
-        <div
-          className="modal-overlay"
-          onClick={() => setShowPasskeyDetails(false)}
-        >
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Passkey Details</h3>
-              <button
-                className="modal-close"
-                onClick={() => setShowPasskeyDetails(false)}
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-content">
-              <div className="modal-field">
-                <label>Public Key X (Qx)</label>
-                <div className="modal-field-value">
-                  <span className="mono">
-                    {credential.qx || "Not available"}
-                  </span>
-                  {credential.qx && (
-                    <button
-                      className="copy-btn"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(credential.qx!);
-                        setCopiedField("qx");
-                        setTimeout(() => setCopiedField(null), 2000);
-                      }}
-                    >
-                      {copiedField === "qx" ? "✓" : "Copy"}
-                    </button>
-                  )}
-                </div>
-                <span className="field-hint">
-                  32-byte hex string (0x + 64 hex characters)
-                </span>
-              </div>
-
-              <div className="modal-field">
-                <label>Public Key Y (Qy)</label>
-                <div className="modal-field-value">
-                  <span className="mono">
-                    {credential.qy || "Not available"}
-                  </span>
-                  {credential.qy && (
-                    <button
-                      className="copy-btn"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(credential.qy!);
-                        setCopiedField("qy");
-                        setTimeout(() => setCopiedField(null), 2000);
-                      }}
-                    >
-                      {copiedField === "qy" ? "✓" : "Copy"}
-                    </button>
-                  )}
-                </div>
-                <span className="field-hint">
-                  32-byte hex string (0x + 64 hex characters)
-                </span>
-              </div>
-
-              <div className="modal-field">
-                <label>Credential ID (Base64URL)</label>
-                <div className="modal-field-value">
-                  <span className="mono">{credential.rawId}</span>
-                  <button
-                    className="copy-btn"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(credential.rawId);
-                      setCopiedField("rawId");
-                      setTimeout(() => setCopiedField(null), 2000);
-                    }}
-                  >
-                    {copiedField === "rawId" ? "✓" : "Copy"}
-                  </button>
-                </div>
-                <span className="field-hint">
-                  Base64URL-encoded credential identifier from the passkey
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PasskeyDetailsModal
+          credential={credential}
+          onClose={() => setShowPasskeyDetails(false)}
+        />
       )}
 
       {/* Success Toast */}
       {showSuccessToast && transferTxHash && (
-        <div className="success-toast">
-          <button className="toast-close" onClick={dismissSuccessToast}>
-            ×
-          </button>
-          <div className="toast-content">
-            <div className="toast-title">✓ Transfer complete!</div>
-            <a
-              href={`https://basescan.org/tx/${transferTxHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="toast-link"
-            >
-              View transaction on Basescan →
-            </a>
-          </div>
-        </div>
+        <SuccessToast txHash={transferTxHash} onDismiss={dismissSuccessToast} />
       )}
     </div>
   );

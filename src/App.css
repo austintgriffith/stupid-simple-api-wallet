@@ -89,6 +89,18 @@ body {
   align-items: flex-start;
 }
 
+.wallet-header-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wallet-header-modal {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .wallet-name {
   color: var(--accent-primary);
   font-size: 0.9rem;
