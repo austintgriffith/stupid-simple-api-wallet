@@ -56,6 +56,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [isLoadingCameras, setIsLoadingCameras] = useState(true);
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
+  const [useWebScanner, setUseWebScanner] = useState(!isNativeApp);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const isScannerRunningRef = useRef(false);
   const scannerContainerId = "qr-scanner-container";
@@ -87,9 +88,9 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
     [onScan, onClose]
   );
 
-  // Enumerate available cameras (web only)
+  // Enumerate available cameras (web scanner)
   useEffect(() => {
-    if (isNativeApp) {
+    if (!useWebScanner) {
       setIsLoadingCameras(false);
       return;
     }
@@ -125,7 +126,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
         setError("Failed to access cameras. Please grant camera permission.");
         setIsLoadingCameras(false);
       });
-  }, []);
+  }, [useWebScanner]);
 
   // Native scanning using Capacitor ML Kit
   const startNativeScan = async () => {
@@ -158,6 +159,20 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
       }
     } catch (err: any) {
       console.error("Native scan error:", err);
+
+      // If native plugin isn't implemented, fall back to web scanner
+      if (
+        err?.message?.includes("not implemented") ||
+        err?.message?.includes("not available")
+      ) {
+        console.log(
+          "Native scanner not available, falling back to web scanner"
+        );
+        setUseWebScanner(true);
+        setIsScanning(false);
+        return;
+      }
+
       setError(err.message || "Failed to scan QR code");
     } finally {
       setIsScanning(false);
@@ -181,7 +196,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
 
   // Initialize scanner instance once
   useEffect(() => {
-    if (isNativeApp || isLoadingCameras) return;
+    if (!useWebScanner || isLoadingCameras) return;
 
     // Create instance once DOM is ready
     const timeout = setTimeout(() => {
@@ -200,7 +215,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
         html5QrCodeRef.current = null;
       }
     };
-  }, [isLoadingCameras]);
+  }, [useWebScanner, isLoadingCameras]);
 
   // Web scanning using html5-qrcode
   const startWebScan = useCallback(
@@ -265,7 +280,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
     [stopScanner, handleScanSuccess]
   );
 
-  // Handle camera change
+  // Handle camera change - full teardown and reinitialize for iOS compatibility
   const handleCameraChange = async (newCameraId: string) => {
     if (newCameraId === selectedCameraId) return;
 
@@ -276,7 +291,49 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
     setSelectedCameraId(newCameraId);
 
     try {
-      await startWebScan(newCameraId);
+      // Full teardown - stop and destroy instance
+      if (html5QrCodeRef.current) {
+        if (isScannerRunningRef.current) {
+          isScannerRunningRef.current = false;
+          try {
+            await html5QrCodeRef.current.stop();
+          } catch (e) {
+            // Ignore stop errors
+          }
+        }
+        // Destroy the instance completely
+        html5QrCodeRef.current = null;
+      }
+
+      // Longer delay for iOS to fully release the camera
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Create fresh instance
+      html5QrCodeRef.current = new Html5Qrcode(scannerContainerId);
+
+      // Start with new camera
+      setError(null);
+      await html5QrCodeRef.current.start(
+        newCameraId,
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+        },
+        (decodedText) => {
+          if (html5QrCodeRef.current && isScannerRunningRef.current) {
+            isScannerRunningRef.current = false;
+            html5QrCodeRef.current.stop().catch(() => {});
+            handleScanSuccess(decodedText);
+          }
+        },
+        () => {}
+      );
+      isScannerRunningRef.current = true;
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        console.error("Camera switch error:", err);
+        setError("Failed to switch camera. Please try again.");
+      }
     } finally {
       setIsSwitchingCamera(false);
     }
@@ -284,7 +341,8 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
 
   // Start scanning based on platform (initial start only)
   useEffect(() => {
-    if (isNativeApp) {
+    if (!useWebScanner) {
+      // Try native scanner first
       startNativeScan();
       return;
     }
@@ -302,9 +360,8 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
     return () => {
       clearTimeout(timeout);
     };
-    // Only run on initial load, not on camera changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingCameras]);
+  }, [useWebScanner, isLoadingCameras, selectedCameraId]);
 
   // Handle close and cleanup
   const handleClose = useCallback(async () => {
@@ -319,9 +376,8 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
     onClose();
   }, [onClose]);
 
-  // For native apps, the scanner takes over the full screen
-  // We just show a loading state while it's active
-  if (isNativeApp) {
+  // For native apps (when web scanner not needed), show loading state while native scanner is active
+  if (!useWebScanner) {
     return (
       <div className="modal-overlay" onClick={handleClose}>
         <div
