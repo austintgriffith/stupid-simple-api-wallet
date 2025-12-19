@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Suspense, lazy } from "react";
 import "./App.css";
 
 // Config
@@ -36,6 +36,14 @@ import { QRScannerModal } from "./components/QRScannerModal";
 import { PasskeyDetailsModal } from "./components/PasskeyDetailsModal";
 import { SuccessToast } from "./components/SuccessToast";
 
+// Lazy load WalletConnect provider to reduce initial bundle size (~256KB gzipped)
+// The provider stays mounted after first use to keep the connection alive
+const WalletConnectProvider = lazy(() =>
+  import("./components/WalletConnectProvider").then((module) => ({
+    default: module.WalletConnectProvider,
+  }))
+);
+
 function App() {
   const [credential, setCredential] = useState<PasskeyCredential | null>(null);
   const [status, setStatus] = useState<string>("");
@@ -44,6 +52,8 @@ function App() {
   const [showPasskeyDetails, setShowPasskeyDetails] = useState<boolean>(false);
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
   const [showQRScanner, setShowQRScanner] = useState<boolean>(false);
+  const [showWalletConnect, setShowWalletConnect] = useState<boolean>(false);
+  const [wcInitialized, setWcInitialized] = useState<boolean>(false);
 
   // Balance state
   const [balances, setBalances] = useState<BalanceResponse["balances"] | null>(
@@ -972,6 +982,12 @@ function App() {
 
           {/* Secondary Actions */}
           <div className="secondary-actions">
+            <button
+              className="btn btn-secondary-action"
+              onClick={() => setShowWalletConnect(true)}
+            >
+              Connect
+            </button>
             <a
               href={`https://slopwallet.com/${smartContractWallet}`}
               target="_blank"
@@ -1106,6 +1122,40 @@ function App() {
       {showSuccessToast && transferTxHash && (
         <SuccessToast txHash={transferTxHash} onDismiss={dismissSuccessToast} />
       )}
+
+      {/* WalletConnect Provider (lazy loaded, stays mounted after first use) */}
+      {(wcInitialized || showWalletConnect) &&
+        credential &&
+        smartContractWallet && (
+          <Suspense
+            fallback={
+              showWalletConnect ? (
+                <div className="modal-overlay">
+                  <div className="modal wc-modal">
+                    <div
+                      className="modal-content"
+                      style={{ textAlign: "center", padding: "48px" }}
+                    >
+                      <div className="spinner"></div>
+                      <p style={{ marginTop: "16px", color: "#666" }}>
+                        Loading WalletConnect...
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null
+            }
+          >
+            <WalletConnectProvider
+              smartWalletAddress={smartContractWallet}
+              credential={credential}
+              showModal={showWalletConnect}
+              onCloseModal={() => setShowWalletConnect(false)}
+              onInitialized={() => setWcInitialized(true)}
+              onRequestReceived={() => setShowWalletConnect(true)}
+            />
+          </Suspense>
+        )}
     </div>
   );
 }

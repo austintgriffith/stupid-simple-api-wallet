@@ -1247,6 +1247,469 @@ h1 {
   color: var(--text-primary);
 }
 
+/* WalletConnect Modal */
+.wc-modal {
+  max-width: 480px;
+}
+
+.wc-header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wc-content {
+  gap: 16px;
+}
+
+/* Badges */
+.wc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.wc-badge-info {
+  background: rgba(124, 58, 237, 0.15);
+  color: var(--accent-secondary);
+}
+
+.wc-badge-success {
+  background: rgba(0, 212, 170, 0.15);
+  color: var(--success);
+}
+
+.wc-badge-warning {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+}
+
+.wc-badge-error {
+  background: rgba(255, 77, 106, 0.15);
+  color: var(--error);
+}
+
+/* Error Display */
+.wc-error {
+  background: rgba(255, 77, 106, 0.1);
+  border: 1px solid rgba(255, 77, 106, 0.3);
+  border-radius: 10px;
+  padding: 12px 16px;
+  color: var(--error);
+  font-size: 0.9rem;
+}
+
+/* Input Section */
+.wc-input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wc-input-section label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.wc-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.wc-input-row .input-field {
+  flex: 1;
+}
+
+.wc-scan-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.wc-scan-btn:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: rgba(0, 212, 170, 0.1);
+}
+
+.wc-scan-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wc-scan-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.wc-connect-btn {
+  padding: 12px 20px;
+  flex-shrink: 0;
+}
+
+.wc-pairing-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+/* Sessions Section */
+.wc-sessions-section,
+.wc-requests-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wc-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wc-section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.wc-disconnect-all {
+  background: transparent;
+  border: none;
+  color: var(--error);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.wc-disconnect-all:hover {
+  background: rgba(255, 77, 106, 0.1);
+}
+
+.wc-sessions-list,
+.wc-requests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Session Card */
+.wc-session-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+.wc-session-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wc-session-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.wc-session-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wc-session-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wc-session-url {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wc-disconnect-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.wc-disconnect-btn:hover {
+  border-color: var(--error);
+  color: var(--error);
+  background: rgba(255, 77, 106, 0.1);
+}
+
+/* Request Card */
+.wc-request-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+.wc-request-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wc-request-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wc-request-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.wc-request-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.wc-request-chain {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.wc-request-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-card);
+  border-radius: 8px;
+}
+
+.wc-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.wc-detail-label {
+  color: var(--text-muted);
+  min-width: 50px;
+}
+
+.wc-detail-value {
+  color: var(--text-primary);
+}
+
+.wc-data-preview {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.wc-batch-calls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wc-batch-call {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.wc-batch-call-num {
+  color: var(--text-muted);
+  min-width: 24px;
+}
+
+.wc-batch-more {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.wc-signing-notice {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.wc-request-error {
+  background: rgba(255, 77, 106, 0.1);
+  border: 1px solid rgba(255, 77, 106, 0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+.wc-request-success {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0, 212, 170, 0.1);
+  border: 1px solid rgba(0, 212, 170, 0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--success);
+  font-size: 0.85rem;
+}
+
+.wc-tx-link {
+  color: var(--accent-primary);
+  text-decoration: none;
+  font-size: 0.8rem;
+}
+
+.wc-tx-link:hover {
+  text-decoration: underline;
+}
+
+.wc-request-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.wc-request-actions .btn {
+  flex: 1;
+  padding: 12px 16px;
+}
+
+.wc-request-time {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* Empty State */
+.wc-empty-state {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-secondary);
+}
+
+.wc-empty-state p {
+  margin: 0 0 8px 0;
+}
+
+.wc-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* WalletConnect Success Toast */
+.wc-success-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  border: 1px solid var(--success);
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 8px 32px rgba(0, 212, 170, 0.3),
+    0 0 0 1px rgba(0, 212, 170, 0.2);
+  z-index: 1100;
+  animation: slideUp 0.3s ease, fadeIn 0.3s ease;
+  max-width: 90%;
+  width: 360px;
+}
+
+.wc-success-toast .toast-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.wc-success-toast .toast-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.wc-success-toast .toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wc-success-toast .toast-title {
+  color: var(--success);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.wc-success-toast .toast-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.wc-success-toast .toast-link {
+  color: var(--accent-primary);
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: opacity 0.2s ease;
+}
+
+.wc-success-toast .toast-link:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
 /* Mobile adjustments */
 @media (max-width: 480px) {
   h1 {
@@ -1272,5 +1735,18 @@ h1 {
 
   .modal-field-value .mono {
     font-size: 0.65rem;
+  }
+
+  .wc-input-row {
+    flex-wrap: wrap;
+  }
+
+  .wc-input-row .input-field {
+    width: 100%;
+    flex: none;
+  }
+
+  .wc-request-actions {
+    flex-direction: column;
   }
 }
