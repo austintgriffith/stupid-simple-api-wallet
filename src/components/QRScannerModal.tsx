@@ -70,6 +70,15 @@ export function QRScannerModal({
   const isScannerRunningRef = useRef(false);
   const scannerContainerId = "qr-scanner-container";
 
+  // Ref to always access the latest onWalletConnect callback
+  // This prevents stale closure issues in async native scanner flow
+  const onWalletConnectRef = useRef(onWalletConnect);
+
+  // Keep ref synced with prop
+  useEffect(() => {
+    onWalletConnectRef.current = onWalletConnect;
+  }, [onWalletConnect]);
+
   // Close on ESC key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -86,8 +95,9 @@ export function QRScannerModal({
     (scannedValue: string) => {
       // Check for WalletConnect URI first
       if (scannedValue.startsWith("wc:")) {
-        if (onWalletConnect) {
-          onWalletConnect(scannedValue);
+        // Use ref to access latest callback, avoiding stale closure in async native scanner
+        if (onWalletConnectRef.current) {
+          onWalletConnectRef.current(scannedValue);
           onClose();
         } else {
           setError(
@@ -107,7 +117,7 @@ export function QRScannerModal({
         );
       }
     },
-    [onScan, onWalletConnect, onClose]
+    [onScan, onClose]
   );
 
   // Enumerate available cameras (web scanner)
