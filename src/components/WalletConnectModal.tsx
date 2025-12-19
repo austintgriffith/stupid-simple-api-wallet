@@ -38,6 +38,8 @@ interface WalletConnectModalProps {
   credential: PasskeyCredential;
   onClose: () => void;
   wcState: WalletConnectState;
+  pendingUri?: string | null;
+  onPendingUriConsumed?: () => void;
 }
 
 // Format value from hex to ETH
@@ -66,6 +68,8 @@ export function WalletConnectModal({
   credential,
   onClose,
   wcState,
+  pendingUri,
+  onPendingUriConsumed,
 }: WalletConnectModalProps) {
   const [wcUri, setWcUri] = useState("");
   const [isScanning, setIsScanning] = useState(false);
@@ -108,6 +112,14 @@ export function WalletConnectModal({
       return () => clearTimeout(timeout);
     }
   }, [successTx]);
+
+  // Auto-pair when a pending URI is provided (from FAB scanner)
+  useEffect(() => {
+    if (pendingUri && isReady) {
+      pair(pendingUri);
+      onPendingUriConsumed?.();
+    }
+  }, [pendingUri, isReady, pair, onPendingUriConsumed]);
 
   const handlePaste = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;

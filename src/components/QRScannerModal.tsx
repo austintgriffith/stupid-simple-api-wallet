@@ -13,12 +13,13 @@ import { Html5Qrcode, CameraDevice } from "html5-qrcode";
 
 interface QRScannerModalProps {
   onScan: (address: string) => void;
+  onWalletConnect?: (uri: string) => void;
   onClose: () => void;
 }
 
 const CAMERA_STORAGE_KEY = "qr_scanner_preferred_camera";
 
-// Validate if the scanned content is a valid Ethereum address or ENS name
+// Validate if the scanned content is a valid Ethereum address, ENS name, or WalletConnect URI
 function isValidScanResult(value: string): boolean {
   // Check for valid Ethereum address
   if (/^0x[a-fA-F0-9]{40}$/.test(value)) {
@@ -35,6 +36,10 @@ function isValidScanResult(value: string): boolean {
       return true;
     }
   }
+  // Check for WalletConnect URI
+  if (value.startsWith("wc:")) {
+    return true;
+  }
   return false;
 }
 
@@ -49,7 +54,11 @@ function extractAddress(value: string): string {
   return value;
 }
 
-export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
+export function QRScannerModal({
+  onScan,
+  onWalletConnect,
+  onClose,
+}: QRScannerModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
@@ -75,6 +84,19 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
   // Handle successful scan
   const handleScanSuccess = useCallback(
     (scannedValue: string) => {
+      // Check for WalletConnect URI first
+      if (scannedValue.startsWith("wc:")) {
+        if (onWalletConnect) {
+          onWalletConnect(scannedValue);
+          onClose();
+        } else {
+          setError(
+            "WalletConnect QR code detected, but WalletConnect is not available."
+          );
+        }
+        return;
+      }
+
       if (isValidScanResult(scannedValue)) {
         const address = extractAddress(scannedValue);
         onScan(address);
@@ -85,7 +107,7 @@ export function QRScannerModal({ onScan, onClose }: QRScannerModalProps) {
         );
       }
     },
-    [onScan, onClose]
+    [onScan, onWalletConnect, onClose]
   );
 
   // Enumerate available cameras (web scanner)

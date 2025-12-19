@@ -10,6 +10,8 @@ interface WalletConnectProviderProps {
   onCloseModal: () => void;
   onInitialized: () => void;
   onRequestReceived: () => void;
+  pendingUri?: string | null;
+  onPendingUriConsumed?: () => void;
 }
 
 export function WalletConnectProvider({
@@ -19,6 +21,8 @@ export function WalletConnectProvider({
   onCloseModal,
   onInitialized,
   onRequestReceived,
+  pendingUri,
+  onPendingUriConsumed,
 }: WalletConnectProviderProps) {
   // Initialize WalletConnect - this stays alive even when modal is closed
   const wcState = useWalletConnect({
@@ -52,6 +56,8 @@ export function WalletConnectProvider({
       credential={credential}
       onClose={onCloseModal}
       wcState={wcState}
+      pendingUri={pendingUri}
+      onPendingUriConsumed={onPendingUriConsumed}
     />
   );
 }

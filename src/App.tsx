@@ -54,6 +54,7 @@ function App() {
   const [showQRScanner, setShowQRScanner] = useState<boolean>(false);
   const [showWalletConnect, setShowWalletConnect] = useState<boolean>(false);
   const [wcInitialized, setWcInitialized] = useState<boolean>(false);
+  const [pendingWcUri, setPendingWcUri] = useState<string | null>(null);
 
   // Balance state
   const [balances, setBalances] = useState<BalanceResponse["balances"] | null>(
@@ -945,7 +946,15 @@ function App() {
             </div>
 
             <button
-              className="btn btn-primary btn-send"
+              className={`btn ${
+                recipientAddress &&
+                transferAmount &&
+                parseFloat(transferAmount) > 0 &&
+                !isResolvingENS &&
+                (!isPotentialENSName(recipientAddress) || ensResolvedAddress)
+                  ? "btn-primary"
+                  : "btn-primary-outline"
+              } btn-send`}
               onClick={handleTransferUSDC}
               disabled={
                 isTransferring ||
@@ -1088,6 +1097,80 @@ function App() {
         </div>
       )}
 
+      {/* Floating Scan Button */}
+      {credential && (
+        <button
+          className="fab-scan"
+          onClick={() => setShowQRScanner(true)}
+          title="Scan QR Code"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M3 7V5C3 3.89543 3.89543 3 5 3H7"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M17 3H19C20.1046 3 21 3.89543 21 5V7"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M21 17V19C21 20.1046 20.1046 21 19 21H17"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M7 21H5C3.89543 21 3 20.1046 3 19V17"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <rect
+              x="7"
+              y="7"
+              width="4"
+              height="4"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <rect
+              x="13"
+              y="7"
+              width="4"
+              height="4"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <rect
+              x="7"
+              y="13"
+              width="4"
+              height="4"
+              rx="1"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <path
+              d="M13 13H17V17"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      )}
+
       {/* QR Code Modal */}
       {showQRModal && smartContractWallet && (
         <QRModal
@@ -1104,6 +1187,11 @@ function App() {
         <QRScannerModal
           onScan={(address) => {
             setRecipientAddress(address);
+            setShowQRScanner(false);
+          }}
+          onWalletConnect={(uri) => {
+            setPendingWcUri(uri);
+            setShowWalletConnect(true);
             setShowQRScanner(false);
           }}
           onClose={() => setShowQRScanner(false)}
@@ -1153,6 +1241,8 @@ function App() {
               onCloseModal={() => setShowWalletConnect(false)}
               onInitialized={() => setWcInitialized(true)}
               onRequestReceived={() => setShowWalletConnect(true)}
+              pendingUri={pendingWcUri}
+              onPendingUriConsumed={() => setPendingWcUri(null)}
             />
           </Suspense>
         )}

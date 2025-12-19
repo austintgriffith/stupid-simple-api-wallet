@@ -282,6 +282,22 @@ h1 {
   transform: translateY(0);
 }
 
+.btn-primary-outline {
+  background: transparent;
+  color: var(--accent-primary);
+  border: 2px solid var(--accent-primary);
+  box-shadow: none;
+}
+
+.btn-primary-outline:hover:not(:disabled) {
+  background: rgba(0, 212, 170, 0.1);
+}
+
+.btn-primary-outline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-secondary {
   background: var(--bg-card);
   color: var(--text-primary);
@@ -1708,6 +1724,46 @@ h1 {
 .wc-success-toast .toast-link:hover {
   opacity: 0.8;
   text-decoration: underline;
+}
+
+/* Floating Action Button */
+.fab-scan {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-primary), #00b894);
+  border: none;
+  color: var(--bg-primary);
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 212, 170, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.fab-scan:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 8px 30px rgba(0, 212, 170, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.fab-scan:active {
+  transform: translateY(0) scale(1);
+}
+
+.fab-scan svg {
+  width: 28px;
+  height: 28px;
+}
+
+.native-app .fab-scan {
+  bottom: 40px;
 }
 
 /* Mobile adjustments */
