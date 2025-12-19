@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Suspense, lazy } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
 import "./App.css";
 
 // Config
@@ -84,6 +84,9 @@ function App() {
   const [walletEnsName, setWalletEnsName] = useState<string | null>(null);
 
   const smartContractWallet = process.env.REACT_APP_SMART_CONTRACT_WALLET;
+
+  // Ref for amount input to focus after scanning
+  const amountInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch balances from SlopWallet API
   const fetchBalances = useCallback(async () => {
@@ -933,6 +936,7 @@ function App() {
                 </button>
               </div>
               <input
+                ref={amountInputRef}
                 id="amount"
                 type="number"
                 placeholder="0.00"
@@ -1188,6 +1192,8 @@ function App() {
           onScan={(address) => {
             setRecipientAddress(address);
             setShowQRScanner(false);
+            // Focus amount input after modal closes
+            setTimeout(() => amountInputRef.current?.focus(), 100);
           }}
           onWalletConnect={(uri) => {
             setPendingWcUri(uri);
