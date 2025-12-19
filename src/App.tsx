@@ -32,6 +32,7 @@ import { truncateAddress } from "./utils/format";
 // Components
 import { WalletHeader } from "./components/WalletHeader";
 import { QRModal } from "./components/QRModal";
+import { QRScannerModal } from "./components/QRScannerModal";
 import { PasskeyDetailsModal } from "./components/PasskeyDetailsModal";
 import { SuccessToast } from "./components/SuccessToast";
 
@@ -42,6 +43,7 @@ function App() {
   const [copied, setCopied] = useState<boolean>(false);
   const [showPasskeyDetails, setShowPasskeyDetails] = useState<boolean>(false);
   const [showQRModal, setShowQRModal] = useState<boolean>(false);
+  const [showQRScanner, setShowQRScanner] = useState<boolean>(false);
 
   // Balance state
   const [balances, setBalances] = useState<BalanceResponse["balances"] | null>(
@@ -62,6 +64,7 @@ function App() {
   );
   const [isResolvingENS, setIsResolvingENS] = useState<boolean>(false);
   const [ensError, setEnsError] = useState<boolean>(false);
+  const [recipientEnsName, setRecipientEnsName] = useState<string | null>(null);
 
   // Success toast state
   const [showSuccessToast, setShowSuccessToast] = useState<boolean>(false);
@@ -123,7 +126,7 @@ function App() {
     }
   }, [smartContractWallet]);
 
-  // ENS resolution with debounce
+  // ENS resolution with debounce (forward: name -> address)
   useEffect(() => {
     const input = recipientAddress.trim();
 
@@ -144,6 +147,26 @@ function App() {
       setEnsError(!resolved);
       setIsResolvingENS(false);
     }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeout);
+  }, [recipientAddress]);
+
+  // Reverse ENS lookup (address -> name)
+  useEffect(() => {
+    const input = recipientAddress.trim();
+
+    // Check if it's a valid Ethereum address
+    const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(input);
+
+    if (!isValidAddress) {
+      setRecipientEnsName(null);
+      return;
+    }
+
+    const timeout = setTimeout(async () => {
+      const ensName = await reverseResolveENS(input);
+      setRecipientEnsName(ensName);
+    }, 500);
 
     return () => clearTimeout(timeout);
   }, [recipientAddress]);
@@ -651,11 +674,11 @@ function App() {
             </svg>
           </button>
           <a
-            href={`https://slopwallet.com/${smartContractWallet}`}
+            href={`https://blockscan.com/address/${smartContractWallet}`}
             target="_blank"
             rel="noopener noreferrer"
             className="external-link-btn"
-            title="View on SlopWallet"
+            title="View on Blockscan"
             tabIndex={-1}
           >
             <svg
@@ -720,15 +743,89 @@ function App() {
           <div className="transfer-card">
             <div className="form-group">
               <label htmlFor="recipient">Recipient Address</label>
-              <input
-                id="recipient"
-                type="text"
-                placeholder="0x... or ENS name"
-                value={recipientAddress}
-                onChange={(e) => setRecipientAddress(e.target.value)}
-                disabled={isTransferring}
-                className="input-field"
-              />
+              <div className="input-with-icon">
+                <input
+                  id="recipient"
+                  type="text"
+                  placeholder="0x... or ENS name"
+                  value={recipientAddress}
+                  onChange={(e) => setRecipientAddress(e.target.value)}
+                  disabled={isTransferring}
+                  className="input-field"
+                />
+                <button
+                  type="button"
+                  className="input-icon-btn"
+                  onClick={() => setShowQRScanner(true)}
+                  disabled={isTransferring}
+                  title="Scan QR code"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M3 7V5C3 3.89543 3.89543 3 5 3H7"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M17 3H19C20.1046 3 21 3.89543 21 5V7"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M21 17V19C21 20.1046 20.1046 21 19 21H17"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M7 21H5C3.89543 21 3 20.1046 3 19V17"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                    <rect
+                      x="7"
+                      y="7"
+                      width="4"
+                      height="4"
+                      rx="1"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                    <rect
+                      x="13"
+                      y="7"
+                      width="4"
+                      height="4"
+                      rx="1"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                    <rect
+                      x="7"
+                      y="13"
+                      width="4"
+                      height="4"
+                      rx="1"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                    <path
+                      d="M13 13H17V17"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
               {isResolvingENS && (
                 <div className="ens-status resolving">Resolving ENS...</div>
               )}
@@ -805,6 +902,11 @@ function App() {
               {ensError && (
                 <div className="ens-status error">ENS name not found</div>
               )}
+              {recipientEnsName && !isPotentialENSName(recipientAddress) && (
+                <div className="ens-status resolved">
+                  <span className="ens-resolved-name">{recipientEnsName}</span>
+                </div>
+              )}
             </div>
 
             <div className="form-group">
@@ -866,6 +968,26 @@ function App() {
                 {transferStatus}
               </div>
             )}
+          </div>
+
+          {/* Secondary Actions */}
+          <div className="secondary-actions">
+            <a
+              href={`https://slopwallet.com/${smartContractWallet}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary-action"
+            >
+              Advanced
+            </a>
+            <a
+              href={`https://blockscan.com/address/${smartContractWallet}#transactions`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary-action"
+            >
+              History
+            </a>
           </div>
 
           {/* Passkey Info */}
@@ -955,8 +1077,20 @@ function App() {
         <QRModal
           address={smartContractWallet}
           ensName={walletEnsName}
+          usdcBalance={balances?.usdc.formatted ?? null}
           onClose={() => setShowQRModal(false)}
           onCopyAddress={copyAddress}
+        />
+      )}
+
+      {/* QR Scanner Modal */}
+      {showQRScanner && (
+        <QRScannerModal
+          onScan={(address) => {
+            setRecipientAddress(address);
+            setShowQRScanner(false);
+          }}
+          onClose={() => setShowQRScanner(false)}
         />
       )}
 

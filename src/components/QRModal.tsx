@@ -5,6 +5,7 @@ import { WalletHeader } from "./WalletHeader";
 interface QRModalProps {
   address: string;
   ensName: string | null;
+  usdcBalance: string | null;
   onClose: () => void;
   onCopyAddress: (address: string) => void;
 }
@@ -12,6 +13,7 @@ interface QRModalProps {
 export function QRModal({
   address,
   ensName,
+  usdcBalance,
   onClose,
   onCopyAddress,
 }: QRModalProps) {
@@ -47,6 +49,9 @@ export function QRModal({
               bgColor="#ffffff"
               fgColor="#000000"
             />
+          </div>
+          <div className="qr-balance-display">
+            {usdcBalance ? `$${usdcBalance}` : "--"} <span>USDC</span>
           </div>
           <div className="qr-full-address mono">{address}</div>
           <button

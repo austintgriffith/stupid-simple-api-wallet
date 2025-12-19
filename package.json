@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^8.0.0",
     "@capacitor/cli": "^8.0.0",
     "@capacitor/core": "^8.0.0",
     "@capacitor/ios": "^8.0.0",
@@ -15,6 +16,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "blockies-react-svg": "^0.0.13",
+    "html5-qrcode": "^2.3.8",
     "http-proxy-middleware": "^3.0.5",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.3",
