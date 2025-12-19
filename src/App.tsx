@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  Suspense,
+  lazy,
+} from "react";
 import "./App.css";
 
 // Config

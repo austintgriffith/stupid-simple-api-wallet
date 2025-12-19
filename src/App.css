@@ -1047,6 +1047,12 @@ h1 {
   font-style: italic;
 }
 
+.modal-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 8px 0;
+}
+
 /* QR Code Modal */
 .qr-modal {
   max-width: 400px;
